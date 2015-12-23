@@ -1,0 +1,4 @@
+backend/private_keys.py
+*.vagrant
+*.pyc
+*.db
