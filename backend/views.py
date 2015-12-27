@@ -20,7 +20,6 @@ session = DBSession()
 
 
 def checkJson(request):
-    print request.headers['Content-Type']
     if request.headers['Content-Type'] not in ['application/json', 'application/json; charset=utf-8']:
         abort(400)
 
@@ -39,19 +38,16 @@ def loginUser(provider):
     if provider == 'google':
 
         # Verify Google Sign in token
-        token = data.get('token_id')
+        google_token = data.get('token_id')
         try:
-            idinfo = client.verify_id_token(token, GOOGLE_WEB_CLIENT_ID)
+            idinfo = client.verify_id_token(google_token, GOOGLE_WEB_CLIENT_ID)
             # If multiple clients access the backend server:
             if idinfo['aud'] not in [GOOGLE_WEB_CLIENT_ID]:
                 raise crypt.AppIdentityError("Unrecognized client.")
             if idinfo['iss'] not in ['accounts.google.com', 'https://accounts.google.com']:
                 raise crypt.AppIdentityError("Wrong issuer.")
         except crypt.AppIdentityError:
-            print 'Invalid token'
-            response = make_response(json.dumps("Unauthorized user."), 401)
-            response.headers['Content-Type'] = 'application/json'
-            return response
+            abort(401)
 
         userid = idinfo['sub']
 
@@ -62,26 +58,68 @@ def loginUser(provider):
             userName = data.get('user_name')
             userEmail = data.get('user_email')
             userPicture = data.get('user_picture')
-            user = User(name = userName, email = userEmail, picture = userPicture, provider = 'google', provider_id = userid)
+            user = User(name = userName, email = userEmail, picture = userPicture, provider = 'google', provider_id = userid, token = '')
             session.add(user)
             session.commit()
             status = 201
-        
-        print repr(session.query(User).filter_by(provider_id=userid).first())
+        print repr(session.query(User).filter_by(provider_id=userid).first()) # debug
 
         TOKEN_DURATION = 300
-        # Make token
+        # Make token for the user
         token = user.generate_auth_token(TOKEN_DURATION)
+        user.token = token
+        session.add(user)
+        session.commit()
 
-        # Send back token to the client
-        body = jsonify({'token': token.decode('ascii'), 'duration': TOKEN_DURATION})
-
+        # Send token back to the client
+        body = jsonify({'message': 'Successful sign in', 'token': token.decode('ascii'), 'duration': TOKEN_DURATION})
         response = make_response(body, status)
         response.headers['Content-Type'] = 'application/json'
         return response
 
     else:
-        response = make_response(json.dumps('Unrecognized provider.'), 404)
+        body = jsonify({'error_message': 'Unrecognized provider.'})
+        response = make_response(body, 404)
+        response.headers['Content-Type'] = 'application/json'
+        return response
+
+@app.route('/api/v1/<provider>/logout', methods=['POST'])
+def logoutUser(provider):
+    checkJson(request)
+    data = request.json
+    if not (data.get('client_type') and data.get('user_id') and data.get('user_token')):
+        abort(400)
+
+    if provider == 'google':
+
+        userid = data.get('user_id')
+        token = data.get('user_token')
+
+        # Check if user exists
+        user = session.query(User).filter_by(provider_id=userid).first()
+        if not user:
+            abort(401)
+        print repr(user) # debug
+
+        # Verify token
+        if (userid != user.verify_auth_token(token)):
+            abort(401)
+
+        # Degrade living token with immediately expiring token
+        token = user.generate_auth_token(0)
+        user.token = token
+        session.add(user)
+        session.commit()
+        print repr(session.query(User).filter_by(provider_id=userid).first()) # debug
+
+        body = jsonify({'message': 'Successful sign out'})
+        response = make_response(body, 200)
+        response.headers['Content-Type'] = 'application/json'
+        return response
+
+    else:
+        body = jsonify({'error_message': 'Unrecognized provider.'})
+        response = make_response(body, 404)
         response.headers['Content-Type'] = 'application/json'
         return response
 
@@ -89,27 +127,38 @@ def loginUser(provider):
 
 
 @app.errorhandler(400)
-def page_not_found(e):
-    response = make_response(json.dumps('Bad request.'), 400)
+def bad_request(e):
+    body = jsonify({'error_message': 'Bad request.'})
+    response = make_response(body, 400)
+    response.headers['Content-Type'] = 'application/json'
+    return response
+
+@app.errorhandler(401)
+def unauthorized_user(e):
+    body = jsonify({'error_message': 'Unauthorized user.'})
+    response = make_response(body, 401)
     response.headers['Content-Type'] = 'application/json'
     return response
 
 @app.errorhandler(404)
 def page_not_found(e):
-    response = make_response(json.dumps('Page Not found.'), 404)
+    body = jsonify({'error_message': 'Page not found.'})
+    response = make_response(body, 404)
     response.headers['Content-Type'] = 'application/json'
     return response
 
 @app.errorhandler(405)
-def page_not_found(e):
-    response = make_response(json.dumps('Method Not Allowed.'), 405)
+def mwthod_not_allowed(e):
+    body = jsonify({'error_message': 'Method not allowed.'})
+    response = make_response(body, 405)
     response.headers['Content-Type'] = 'application/json'
     return response
 
 # Doesn't work in debug mode!
 @app.errorhandler(500)
 def internal_server_error(e):
-    response = make_response(json.dumps('Internal Server Error.'), 500)
+    body = jsonify({'error_message': 'Internal server error.'})
+    response = make_response(body, 500)
     response.headers['Content-Type'] = 'application/json'
     return response
 
