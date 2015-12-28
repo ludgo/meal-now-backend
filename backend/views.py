@@ -1,9 +1,11 @@
-from models import Base, User
+from models import Base, User, Offer
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from flask import abort, Flask, jsonify, make_response, render_template, request
 from oauth2client import client, crypt
+
+import utilities
 from private_keys import GOOGLE_WEB_CLIENT_ID
 
 import httplib2
@@ -28,6 +30,7 @@ def checkJson(request):
 def welcomePage():
     return render_template('index.html')
 
+# Users
 @app.route('/api/v1/<provider>/login', methods=['POST'])
 def loginUser(provider):
     checkJson(request)
@@ -61,18 +64,19 @@ def loginUser(provider):
             user = User(name = userName, email = userEmail, picture = userPicture, provider = 'google', provider_id = userid, token = '')
             session.add(user)
             session.commit()
+            print "User created."
             status = 201
-        print repr(session.query(User).filter_by(provider_id=userid).first()) # debug
 
-        TOKEN_DURATION = 300
+        TOKEN_DURATION = 300000
         # Make token for the user
         token = user.generate_auth_token(TOKEN_DURATION)
         user.token = token
         session.add(user)
         session.commit()
+        print repr(user) # debug
 
         # Send token back to the client
-        body = jsonify({'message': 'Successful sign in', 'token': token.decode('ascii'), 'duration': TOKEN_DURATION})
+        body = jsonify({'message': 'User signed in.', 'token': token.decode('ascii'), 'duration': TOKEN_DURATION})
         response = make_response(body, status)
         response.headers['Content-Type'] = 'application/json'
         return response
@@ -110,9 +114,9 @@ def logoutUser(provider):
         user.token = token
         session.add(user)
         session.commit()
-        print repr(session.query(User).filter_by(provider_id=userid).first()) # debug
+        print repr(user) # debug
 
-        body = jsonify({'message': 'Successful sign out'})
+        body = jsonify({'message': 'User signed out.'})
         response = make_response(body, 200)
         response.headers['Content-Type'] = 'application/json'
         return response
@@ -120,6 +124,74 @@ def logoutUser(provider):
     else:
         body = jsonify({'error_message': 'Unrecognized provider.'})
         response = make_response(body, 404)
+        response.headers['Content-Type'] = 'application/json'
+        return response
+
+# Offers
+@app.route('/api/v1/offers', methods=['GET', 'POST'])
+def offers():
+    checkJson(request)
+
+    if request.method == 'GET':
+
+        # Provide not yet filled offers only
+        offers = session.query(Offer).filter_by(filled=0).all()
+        offers_array = []
+        for offer in offers:
+            user = session.query(User).filter_by(id=offer.user_id).first()
+            if user:
+                # Provide info about both the offer and its creator
+                item = (offer.serialize).copy()
+                item.update(user.serialize)
+                offers_array.append(item)
+
+        body = json.dumps({"message": "%d active offers." % len(offers_array), "offers": offers_array})
+        response = make_response(body, 200)
+        response.headers['Content-Type'] = 'application/json'
+        return response
+
+    elif request.method == 'POST':
+
+        data = request.json
+        if not (data.get('client_type') and data.get('user_id') and data.get('user_token') and data.get('offer_meal') and data.get('offer_location')):
+            abort(400)
+
+        userid = data.get('user_id')
+        token = data.get('user_token')
+
+        # Check if user exists
+        user = session.query(User).filter_by(provider_id=userid).first()
+        if not user:
+            abort(401)
+        print repr(user) # debug
+
+        # Verify token
+        if (userid != user.verify_auth_token(token)):
+            abort(401)
+
+        # Request coordinates based on Google geocode Api
+        offerLocation = data.get('offer_location')
+        status, latitude, longitude = utilities.getGeocodeLocation(offerLocation)
+        if status != 200:
+            body = jsonify({'error_message': 'Service temporary unavailable.'})
+            response = make_response(body, 503)
+            response.headers['Content-Type'] = 'application/json'
+            return response
+        elif latitude is None or longitude is None:
+            body = jsonify({'message': 'Unknown location.'})
+            response = make_response(body, 200)
+            response.headers['Content-Type'] = 'application/json'
+            return response
+
+        offerMeal = data.get('offer_meal')
+        offer = Offer(user_id = user.id, meal = offerMeal, location = offerLocation, latitude = latitude, longitude = longitude)
+        session.add(offer)
+        session.commit()
+        print "Offer created."
+        print repr(offer) # debug
+
+        body = jsonify({'message': 'Offer created.'})
+        response = make_response(body, 201)
         response.headers['Content-Type'] = 'application/json'
         return response
 

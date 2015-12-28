@@ -21,6 +21,14 @@ class User(Base):
     provider_id = Column(String, index=True)
     token = Column(String)
 
+    @property
+    def serialize(self):
+        return { "user": {
+            'name': self.name,
+            'email': self.email,
+            'picture': self.picture,
+        } }
+
     def generate_auth_token(self, expiration=600):
         s = Serializer(secret_key, expires_in = expiration)
         # Token will live for specified amount of time
@@ -47,6 +55,32 @@ class User(Base):
     def __repr__(self):
         return "<User(id='%r', name='%r', email='%r', picture='%r', provider='%r', provider_id='%r', token='%r')>" % (
                              self.id, self.name, self.email, self.picture, self.provider, self.provider_id, self.token)
+
+class Offer(Base):
+    __tablename__ = 'offers'
+
+    id = Column(Integer, primary_key = True)
+    user_id = Column(Integer, ForeignKey('users.id'))
+    user = relationship(User)
+
+    meal = Column(String)
+    location = Column(String)
+    latitude = Column(String)
+    longitude = Column(String)
+    filled = Column(Integer, default=0) # boolean
+
+    @property
+    def serialize(self):
+        return { "offer": {
+            'meal': self.meal,
+            'location': self.location,
+            'latitude': self.latitude,
+            'longitude': self.longitude,
+        } }
+
+    def __repr__(self):
+        return "<Offer(id='%r', user_id='%r', meal='%r', location='%r', latitude='%r', longitude='%r', filled='%r')>" % (
+                             self.id, self.user_id, self.meal, self.location, self.latitude, self.longitude, self.filled)
 
 
 engine = create_engine('sqlite:///meal_now.db')
