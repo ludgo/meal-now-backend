@@ -10,6 +10,7 @@ from private_keys import GOOGLE_WEB_CLIENT_ID
 
 import httplib2
 import json
+from time import strftime
 
 
 app = Flask(__name__)
@@ -134,8 +135,11 @@ def offers():
 
     if request.method == 'GET':
 
+        page = int(request.args.get('page', '1'))
+
         # Provide not yet filled offers only
-        offers = session.query(Offer).filter_by(filled=0).all()
+        OFFERS_PER_PAGE = 10
+        offers = session.query(Offer).filter_by(filled=0).limit(OFFERS_PER_PAGE).offset((page-1)*OFFERS_PER_PAGE).all()
         offers_array = []
         for offer in offers:
             user = session.query(User).filter_by(id=offer.user_id).first()
@@ -144,6 +148,7 @@ def offers():
                 item = (offer.serialize).copy()
                 item.update(user.serialize)
                 offers_array.append(item)
+                print repr(offer) # debug
 
         body = json.dumps({"message": "%d active offers." % len(offers_array), "offers": offers_array})
         response = make_response(body, 200)
@@ -184,7 +189,8 @@ def offers():
             return response
 
         offerMeal = data.get('offer_meal')
-        offer = Offer(user_id = user.id, meal = offerMeal, location = offerLocation, latitude = latitude, longitude = longitude)
+        currentTime = strftime("%Y-%m-%d %H:%M:%S")
+        offer = Offer(user_id = user.id, time_created = currentTime, meal = offerMeal, location = offerLocation, latitude = latitude, longitude = longitude)
         session.add(offer)
         session.commit()
         print "Offer created."

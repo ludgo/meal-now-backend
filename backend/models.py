@@ -24,6 +24,7 @@ class User(Base):
     @property
     def serialize(self):
         return { "user": {
+            'id': self.id,
             'name': self.name,
             'email': self.email,
             'picture': self.picture,
@@ -63,6 +64,7 @@ class Offer(Base):
     user_id = Column(Integer, ForeignKey('users.id'))
     user = relationship(User)
 
+    time_created = Column(String(32)) # YYYY-MM-DD HH:MM:SS
     meal = Column(String)
     location = Column(String)
     latitude = Column(String)
@@ -72,15 +74,19 @@ class Offer(Base):
     @property
     def serialize(self):
         return { "offer": {
+            'id': self.id,
+            'user_id': self.user_id,
+            'time_created': self.time_created,
             'meal': self.meal,
             'location': self.location,
             'latitude': self.latitude,
             'longitude': self.longitude,
+            'filled': self.filled,
         } }
 
     def __repr__(self):
-        return "<Offer(id='%r', user_id='%r', meal='%r', location='%r', latitude='%r', longitude='%r', filled='%r')>" % (
-                             self.id, self.user_id, self.meal, self.location, self.latitude, self.longitude, self.filled)
+        return "<Offer(id='%r', user_id='%r', time_created='%r', meal='%r', location='%r', latitude='%r', longitude='%r', filled='%r')>" % (
+                             self.id, self.user_id, self.time_created, self.meal, self.location, self.latitude, self.longitude, self.filled)
 
 
 engine = create_engine('sqlite:///meal_now.db')
