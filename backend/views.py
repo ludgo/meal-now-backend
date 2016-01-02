@@ -36,10 +36,13 @@ def welcomePage():
 def loginUser(provider):
     checkJson(request)
     data = request.json
-    if not (data.get('client_type') and data.get('user_name') and data.get('user_email') and data.get('user_picture') and data.get('token_id')):
-        abort(400)
+    if not (data.get('client_type') and data.get('user_name') and data.get('user_email') and data.get('user_picture')):
+            abort(400)
 
     if provider == 'google':
+
+        if not data.get('token_id'):
+            abort(400)
 
         # Verify Google Sign in token
         google_token = data.get('token_id')
@@ -54,19 +57,28 @@ def loginUser(provider):
             abort(401)
 
         userid = idinfo['sub']
-
-        # Check if user exists, if it doesn't make a new one
+        userName = data.get('user_name')
+        userEmail = data.get('user_email')
+        userPicture = data.get('user_picture')
+            
+        # Check if user exists
         status = 200
         user = session.query(User).filter_by(provider_id=userid).first()
         if not user:
-            userName = data.get('user_name')
-            userEmail = data.get('user_email')
-            userPicture = data.get('user_picture')
+            # User doesn't exist, make a new one
             user = User(name = userName, email = userEmail, picture = userPicture, provider = 'google', provider_id = userid, token = '')
             session.add(user)
             session.commit()
             print "User created."
             status = 201
+        else:
+            # User exists, check profile changes at Google account
+            if user.name != userName:
+                user.name = userName
+            if user.email != userEmail:
+                user.email = userEmail
+            if user.picture != userPicture:
+                user.picture = userPicture
 
         TOKEN_DURATION = 300000
         # Make token for the user
@@ -77,7 +89,9 @@ def loginUser(provider):
         print repr(user) # debug
 
         # Send token back to the client
-        body = jsonify({'message': 'User signed in.', 'token': token.decode('ascii'), 'duration': TOKEN_DURATION})
+        obj = {'message': 'User signed in.', 'token': token.decode('ascii')}
+        obj.update(user.serialize)
+        body = jsonify(obj)
         response = make_response(body, status)
         response.headers['Content-Type'] = 'application/json'
         return response
